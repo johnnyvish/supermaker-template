@@ -1,0 +1,21 @@
+# Node stuff
+node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Next build output
+.next
+out
+
+# Git + editor stuff
+.git
+.gitignore
+.vscode
+.idea
+.DS_Store
+
+# Docker + local env files
+Dockerfile
+*.local
+.env*

@@ -16,16 +16,7 @@ export default function Home() {
   }, []);
 
   return (
-    <main
-      style={{
-        fontFamily: "system-ui, sans-serif",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        padding: "2rem",
-      }}
-    >
-      <h1>🚀 Next.js + FastAPI</h1>
+    <main className="flex justify-center items-center h-screen w-full">
       <p style={{ fontSize: "1.2rem", marginTop: "1rem" }}>{message}</p>
     </main>
   );
