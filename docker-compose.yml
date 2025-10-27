@@ -1,15 +1,26 @@
 services:
-  backend:
-    build: ./backend
-    ports:
-      - "8000:8000"
+    backend:
+        build: ./backend
+        ports:
+            - '8000:8000'
+        volumes:
+            - ./backend/app:/app/app
+        environment:
+            WATCHFILES_FORCE_POLLING: 'true'
 
-  frontend:
-    build: ./frontend
-    ports:
-      - "3000:3000"
-    environment:
-      # Used by the frontend to call the backend from the browser
-      NEXT_PUBLIC_API_URL: "http://localhost:8000"
-    depends_on:
-      - backend
+    frontend:
+        build: ./frontend
+        ports:
+            - '3000:3000'
+        environment:
+            # Used by the frontend to call the backend from the browser
+            NEXT_PUBLIC_API_URL: 'http://localhost:8000'
+            # Enable reliable file watching inside Docker on macOS/Windows
+            WATCHPACK_POLLING: 'true'
+            CHOKIDAR_USEPOLLING: 'true'
+        volumes:
+            - ./frontend:/app
+            # Keep container's node_modules (from image) instead of host's
+            - /app/node_modules
+        depends_on:
+            - backend
