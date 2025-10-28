@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Navbar from './components/Navbar';
 
 export default function Home() {
     const [message, setMessage] = useState('Loading...');
@@ -17,7 +18,7 @@ export default function Home() {
 
     return (
         <main className=''>
-            <div>navbar</div>
+            <Navbar />
             <div>sidebar</div>
             <div>
                 <p>{message}</p>
