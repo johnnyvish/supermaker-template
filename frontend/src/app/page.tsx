@@ -11,13 +11,18 @@ export default function Home() {
 
         fetch(apiUrl)
             .then((res) => res.json())
-            .then((data) => setMessage(data.message))
+            .then((data: { message: string }) => setMessage(data.message))
             .catch((err) => setMessage(`Error: ${err.message}`));
     }, []);
 
     return (
-        <main className='flex justify-center items-center h-screen w-full'>
-            <p style={{ fontSize: '1.2rem', marginTop: '1rem' }}>{message}</p>
+        <main className=''>
+            <div>navbar</div>
+            <div>sidebar</div>
+            <div>
+                <p>{message}</p>
+            </div>
+            <div>footer</div>
         </main>
     );
 }
