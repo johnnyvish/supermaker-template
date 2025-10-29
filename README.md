@@ -13,8 +13,8 @@ Minimal instructions to boot the full stack with Docker.
    docker compose up --build
    ```
 2. Wait for the images to build and services to start:
-   - Backend: http://localhost:8000
-   - Frontend: http://localhost:3000
+   - Backend: http://localhost:8001
+   - Frontend: http://localhost:3001
 
 ## Stop the stack
 

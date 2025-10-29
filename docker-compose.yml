@@ -2,7 +2,7 @@ services:
     backend:
         build: ./backend
         ports:
-            - '8000:8000'
+            - '8001:8001'
         volumes:
             - ./backend/app:/app/app
         environment:
@@ -11,10 +11,10 @@ services:
     frontend:
         build: ./frontend
         ports:
-            - '3000:3000'
+            - '3001:3001'
         environment:
             # Used by the frontend to call the backend from the browser
-            NEXT_PUBLIC_API_URL: 'http://localhost:8000'
+            NEXT_PUBLIC_API_URL: 'http://localhost:8001'
             # Enable reliable file watching inside Docker on macOS/Windows
             WATCHPACK_POLLING: 'true'
             CHOKIDAR_USEPOLLING: 'true'
