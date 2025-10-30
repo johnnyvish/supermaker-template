@@ -7,7 +7,7 @@ export default function Home() {
     const [message, setMessage] = useState('Loading...');
 
     useEffect(() => {
-        // NEXT_PUBLIC_API_URL is defined in docker-compose.yml (e.g., http://localhost:8000)
+        // NEXT_PUBLIC_API_URL is defined in docker-compose.yml (e.g., http://localhost:8001)
         const apiUrl = `${process.env.NEXT_PUBLIC_API_URL}/ping`;
 
         fetch(apiUrl)

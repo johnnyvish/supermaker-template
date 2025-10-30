@@ -1,74 +1,57 @@
-# Create specific list of todos for backend with the below requirements of a general flow
+# Backend Checklist Runbook (LLM INTERNAL — NOT A PRODUCT FEATURE)
 
-#CRUD REQUIREMENTS:
+This file defines **how** you (the LLM) create and **execute** the per-feature checklist.  
+Do **not** build a to-do/task product; this is an **internal runbook**.
 
-## 1. Create a supabase database by following /app/crud/docs/supabase_setup.md
+## Where to write the plan
 
-## 2. Create necessary schemas
+-   Create `backend/app/docs/backend_todos_<feature_name>.md` right before implementation.
 
-## 3. Create necessary CRUD functions based on schemas and requirements using /app/crud/docs/schema_builder.md
+## Required format (use verbatim)
 
-Before beginning backend implementation, you must create a concise, actionable checklist of steps and save it to `backend/app/docs/backend_todos_<feature_name>.md`. This list must serve as a reference during implementation.
+Wrap with sentinel markers and use this YAML schema:
 
-The checklist should include (at minimum):
+````markdown
+<!-- BEGIN_PLAN -->
 
--   Identified entities and planned CRUD endpoints
--   Required integrations and their endpoints/hooks
--   Auth and configuration dependencies
--   Validation models (request/response) to add
--   Logging/error handling touchpoints
+```yaml
+plan:
+  feature: "<feature_name>"
+  version: 1
+  tasks:
+    - id: T1
+      desc: "Create/configure Supabase per backend/app/docs/supabase_setup.md"
+      verify: "env has SUPABASE_*; SUPABASE_URL reachable"
+    - id: T2
+      desc: "Generate & apply schema per backend/app/docs/schema_builder.md"
+      verify: "tables exist"
+    - id: T3
+      desc: "Implement CRUD in backend/app/crud/ and register in backend/app/main.py"
+      verify: "`/openapi.json` shows endpoints; 200/201 responses"
+execution:
+  policy:
+    continue_after_plan: true
+    update_checklist_on_each_task: true
+    on_block: "record missing env/inputs under blocked_on; continue others"
+status:
+  overall: "in_progress"   # in_progress | done | blocked
+  updated_at: "<ISO8601>"
+<!-- END_PLAN -->
 
-For each entity, Supermaker should determine:
+## Execution rules
+1. **Immediately** start executing T1…TN after writing the plan.
+2. Update each task with `status: done|blocked` and `notes:`.
+3. If blocked, write `blocked_on:` (e.g., “need SUPABASE_SERVICE_ROLE_KEY”) and proceed to other tasks.
+4. After each task, **verify** artifacts and write/update docs in `backend/app/docs/`.
+5. Never hard-code secrets; use env vars.
 
--   The fields that describe it (name, phone, status, etc.).
--   Which operations the business needs (create, view, edit, delete, list/search).
+## CRUD requirements (summary)
+- **Supabase**: `backend/app/docs/supabase_setup.md`
+- **Schema**: `backend/app/docs/schema_builder.md`
+- **CRUD**: implement under `backend/app/crud/`, expose via FastAPI, register in `backend/app/main.py`.
 
-This definition becomes the source of truth for CRUD.
-
-## Add CRUD Logic
-
-For each identified entity:
-
-1. Create code under `backend/app/crud/` to:
-    - Create a record
-    - Read a record
-    - Update a record
-    - Delete a record
-    - List records (with pagination if needed)
-2. Expose these operations through FastAPI routes.
-3. Register those routes in `backend/app/main.py` (either inline or by importing a router module).
-
-CRUD endpoints should follow a consistent pattern, for example:
-
--   POST `/leads`
--   GET `/leads/:id`
--   PATCH `/leads/:id`
--   DELETE `/leads/:id`
--   GET `/leads` (list, with optional filters / pagination)
-
-## Add Integrations (If Required)
-
-If the user’s request includes external actions like:
-
--   "send a text reminder,"
--   "charge a credit card,"
--   "sync into our internal system,"
-
-then Supermaker should determine which integrations are required.
-
-Then, it should follow the below process:
-
-1. Look for the relevant folder under `backend/app/integrations/<integration_name>/`.
-2. Inside that folder, look for the primary module file named `<integration_name>.py` that contains the client/service logic.
-3. Expose behavior through FastAPI endpoints or internal helper functions so the frontend (or automations) can trigger it safely.
-4. Use environment variables for credentials, not hardcoded values.
-
-Example structure:
-
+## Integrations (if needed)
+- Path: `backend/app/integrations/<integration>/<integration>.py`
+- Use env vars for credentials; expose safe endpoints or helpers.
 ```
-backend/app/integrations/
-| <integration1>/
-|   <integration1>.py
-| <integration2>/
-|   <integration2>.py
-```
+````
