@@ -110,6 +110,54 @@ def create_supabase_project(cfg: ProjectCreateConfig) -> dict:
     return resp.json()
 
 
+def get_project_api_keys(project_ref: str, token: str) -> Dict[str, str]:
+    """Fetch anon and service role API keys for a project via Management API.
+
+    Returns a mapping containing zero or more of: {"anon": str, "service_role": str}.
+    Tolerates different response shapes from the API.
+    """
+    url = f"https://api.supabase.com/v1/projects/{project_ref}/api-keys"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/json",
+    }
+    try:
+        resp = requests.get(url, headers=headers, timeout=60)
+        if resp.status_code >= 400:
+            print(f"\nWarning: Failed to fetch API keys: {resp.status_code} {resp.text}")
+            return {}
+        data = resp.json()
+    except Exception as e:
+        print(f"\nWarning: Error fetching API keys: {e}")
+        return {}
+
+    keys: Dict[str, str] = {}
+    # Normalize to iterable of key objects
+    items = []
+    if isinstance(data, dict):
+        if isinstance(data.get("keys"), list):
+            items = data["keys"]
+        else:
+            # some responses might embed directly
+            items = list(data.values()) if data else []
+    elif isinstance(data, list):
+        items = data
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or item.get("role") or item.get("type") or "").lower()
+        value = item.get("api_key") or item.get("key") or item.get("token")
+        if not value:
+            continue
+        if "anon" in name:
+            keys.setdefault("anon", value)
+        if "service" in name and "role" in name:
+            keys.setdefault("service_role", value)
+
+    return keys
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Supabase database bootstrap")
     parser.add_argument(
@@ -224,6 +272,20 @@ def main() -> None:
             current["SUPABASE_PROJECT_NAME"] = project_name
             if db_password:
                 current["SUPABASE_DB_PASSWORD"] = db_password
+
+            # Derive URL from project ref when possible
+            project_ref = current.get("SUPABASE_PROJECT_ID", "").strip()
+            if project_ref:
+                # Always set URL when project ref is known; avoid leaving an empty pre-existing key
+                current["SUPABASE_URL"] = f"https://{project_ref}.supabase.co"
+
+            # Attempt to fetch anon/service role keys via Management API
+            if token and project_ref:
+                api_keys = get_project_api_keys(project_ref, token)
+                if api_keys.get("anon"):
+                    current["SUPABASE_ANON_KEY"] = api_keys["anon"]
+                if api_keys.get("service_role"):
+                    current["SUPABASE_SERVICE_ROLE_KEY"] = api_keys["service_role"]
 
             write_env_file(env_path, current)
             print(f"\nWrote project credentials to: {env_path}")

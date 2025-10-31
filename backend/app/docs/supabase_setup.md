@@ -32,19 +32,20 @@ This prints the SQL to create a schema derived from your app name:
 python -m app.crud.supabase_db_bootstrap --app-name "Acme CRM"
 ```
 
-Paste the SQL into the Supabase SQL Editor (or execute via API/psql) for your target project database.
-
 ### 4) Persist new project credentials to env
 
 After a successful project creation, update `backend/supabase.env` with the new project's details so the app and tools can use them.
 
-When using the `--write-env` flag, the bootstrapper writes only:
+When using the `--write-env` flag, the bootstrapper writes:
 
--   `SUPABASE_PROJECT_ID`: the project id returned by the Management API
+-   `SUPABASE_PROJECT_ID`: the project id (aka project ref)
 -   `SUPABASE_PROJECT_NAME`: the project/app name
 -   `SUPABASE_DB_PASSWORD`: the DB password used/generated during creation
+-   `SUPABASE_URL`: derived from the project ref as `https://<ref>.supabase.co`
+-   `SUPABASE_ANON_KEY`: fetched via the Management API (if token/permissions allow)
+-   `SUPABASE_SERVICE_ROLE_KEY`: fetched via the Management API (if token/permissions allow)
 
-Other fields like `SUPABASE_DB_REGION`, `SUPABASE_DB_TIER`, and `SUPABASE_ORG_ID` should already be present in your env and are not modified by the flag. Optionally, you may also add (from Dashboard → Project Settings → API): `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`.
+Other fields like `SUPABASE_DB_REGION`, `SUPABASE_DB_TIER`, and `SUPABASE_ORG_ID` should already be present in your env.
 
 Example (replace placeholder values):
 
@@ -54,19 +55,9 @@ cat >> backend/supabase.env << 'EOF'
 SUPABASE_PROJECT_ID=dlbqafqkbamozxqkzhdw
 SUPABASE_PROJECT_NAME=test
 SUPABASE_DB_PASSWORD=<STRONG_PASSWORD_USED_OR_GENERATED>
-# Optional (copy from Dashboard → Project Settings → API)
+# The script will auto-populate these when possible; otherwise copy from Dashboard → Project Settings → API
 SUPABASE_URL=<https://YOUR-PROJECT-REF.supabase.co>
 SUPABASE_ANON_KEY=<YOUR-ANON-KEY>
 SUPABASE_SERVICE_ROLE_KEY=<YOUR-SERVICE-ROLE-KEY>
 EOF
 ```
-
-Notes:
-
--   If the creation output does not include API URL/keys, retrieve them from the Supabase Dashboard under Project Settings → API.
--   Keep `backend/supabase.env` out of version control; use a secret manager or CI/CD env vars for production.
-
-### Notes
-
--   Never commit secrets. Keep your env file out of version control.
--   For production, store secrets in a secret manager and set environment variables in CI/CD.

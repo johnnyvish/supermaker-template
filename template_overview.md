@@ -37,9 +37,9 @@ We keep this template consistent and opinionated so that:
 -   CRUD (entities): `backend/app/crud/` (to be created per entity)
 
 ## Flow
-First, explore the codebase and create a full list of todos for the user's request. Store this in `/todos/todos_<feature_name>.md`. 
+First, you must explore the codebase and create a full list of todos you must follow and reference. Store this in `/todos/todos_<feature_name>.md`. 
 
-Use this newly generated todo as reference when completing the below steps.
+Then, you must complete the below steps while following the todo list you created.
 
 1. Navigate to backend_overview.md and complete all of the processes and subprocesses.
 2. Navigate to frontend_overview.md and complete all of the processes and subprocesses.
