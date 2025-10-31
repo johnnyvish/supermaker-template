@@ -1,23 +1,89 @@
-import { callProxy } from "@/utils";
-import type { ImageGenerationAPI } from "@/modules/module_types/imageGeneration";
-import type {
-  ProxyResponse,
-  ImageGenerationResponse,
-} from "@/utils";
-
-// Constants
-const DEFAULT_MODEL = "gpt-image-1";
+// Self-contained image generation using Canvas as a placeholder
 
 /**
  * Convert blob to base64 data URL
  */
 const blobToBase64DataUrl = (blob: Blob): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => resolve(reader.result as string);
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+    });
+};
+
+const makeCanvas = (w: number, h: number): HTMLCanvasElement => {
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    return canvas;
+};
+
+const sizeToDims = (
+    size: '1024x1024' | '1024x1536' | '1536x1024' | 'auto'
+): { w: number; h: number } => {
+    switch (size) {
+        case '1024x1536':
+            return { w: 1024, h: 1536 };
+        case '1536x1024':
+            return { w: 1536, h: 1024 };
+        case 'auto':
+        case '1024x1024':
+        default:
+            return { w: 1024, h: 1024 };
+    }
+};
+
+const drawPlaceholder = async (
+    prompt: string,
+    size: '1024x1024' | '1024x1536' | '1536x1024' | 'auto',
+    background: 'transparent' | 'opaque'
+): Promise<string> => {
+    if (typeof document === 'undefined') {
+        // Server-side fallback: 1x1 transparent PNG
+        return 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=';
+    }
+
+    const { w, h } = sizeToDims(size);
+    const canvas = makeCanvas(w, h);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return canvas.toDataURL('image/png');
+
+    if (background === 'opaque') {
+        ctx.fillStyle = '#f2f2f2';
+        ctx.fillRect(0, 0, w, h);
+    } else {
+        // Transparent background by default
+        ctx.clearRect(0, 0, w, h);
+    }
+
+    // Simple gradient box
+    const grad = ctx.createLinearGradient(0, 0, w, h);
+    grad.addColorStop(0, '#4f46e5');
+    grad.addColorStop(1, '#06b6d4');
+    ctx.fillStyle = grad;
+    ctx.fillRect(20, 20, w - 40, h - 40);
+
+    // Draw prompt text
+    ctx.fillStyle = '#ffffff';
+    ctx.font = `${Math.max(16, Math.min(28, Math.floor(w / 36)))}px Arial`;
+    const words = prompt.slice(0, 160).split(' ');
+    const maxWidth = w - 80;
+    let line = '';
+    let y = 80;
+    for (const word of words) {
+        const test = line + word + ' ';
+        if (ctx.measureText(test).width > maxWidth) {
+            ctx.fillText(line, 40, y);
+            line = word + ' ';
+            y += 32;
+        } else {
+            line = test;
+        }
+    }
+    if (line) ctx.fillText(line, 40, y);
+
+    return canvas.toDataURL('image/png');
 };
 
 /**
@@ -30,50 +96,13 @@ const blobToBase64DataUrl = (blob: Blob): Promise<string> => {
  */
 
 export const generate = async (
-  prompt: string,
-  quality: "low" | "medium" | "high" | "auto" = "auto",
-  size: "1024x1024" | "1024x1536" | "1536x1024" | "auto" = "auto",
-  background: "transparent" | "opaque" = "opaque"
+    prompt: string,
+    quality: 'low' | 'medium' | 'high' | 'auto' = 'auto',
+    size: '1024x1024' | '1024x1536' | '1536x1024' | 'auto' = 'auto',
+    background: 'transparent' | 'opaque' = 'opaque'
 ): Promise<string> => {
-  try {
-    const requestPayload = {
-      model: DEFAULT_MODEL,
-      prompt: prompt,
-      quality: quality === "auto" ? "standard" : quality,
-      size: size === "auto" ? "1024x1024" : size,
-      background: background,
-    };
-
-    const result = await callProxy({
-      service: "openai",
-      operation: "image_generation",
-      payload: requestPayload,
-    });
-
-    const proxyResponse = result as ProxyResponse<ImageGenerationResponse>;
-    const response = proxyResponse.data;
-
-    if (!response || !response.data || response.data.length === 0) {
-      throw new Error("No image data received from API");
-    }
-
-    // Handle both URL and base64 responses (different OpenAI models return different formats)
-    const imageData = response.data[0];
-    if (imageData.url) {
-      // Fetch the image from the URL
-      const imageResponse = await fetch(imageData.url);
-      const imageBlob = await imageResponse.blob();
-      return await blobToBase64DataUrl(imageBlob);
-    } else if (imageData.b64_json) {
-      return `data:image/png;base64,${imageData.b64_json}`;
-    } else {
-      throw new Error("No valid image data format in API response");
-    }
-  } catch (error) {
-    const errorMessage =
-      error instanceof Error ? error.message : "Unknown error";
-    throw new Error(`Image generation failed: ${errorMessage}`);
-  }
+    void quality; // quality is a no-op for the placeholder
+    return drawPlaceholder(prompt, size, background);
 };
 
 /**
@@ -87,68 +116,55 @@ export const generate = async (
  * @returns Base64 data URL of the edited image
  */
 export const edit = async (
-  imageDataUrl: string,
-  prompt: string,
-  quality: "low" | "medium" | "high" | "auto" = "auto",
-  _size: "1024x1024" | "1024x1536" | "1536x1024" | "auto" = "auto",
-  background: "transparent" | "opaque" = "opaque"
+    imageDataUrl: string,
+    prompt: string,
+    quality: 'low' | 'medium' | 'high' | 'auto' = 'auto',
+    _size: '1024x1024' | '1024x1536' | '1536x1024' | 'auto' = 'auto',
+    background: 'transparent' | 'opaque' = 'opaque'
 ): Promise<string> => {
-  void _size; // Size parameter reserved for future use
-  try {
-    // Convert data URL to base64 format expected by Replicate
-    const getBase64Data = (dataUrl: string) => {
-      const matches = dataUrl.match(/^data:([A-Za-z-+/]+);base64,(.+)$/);
-      if (!matches || matches.length !== 3) {
-        throw new Error("Invalid data URL format");
-      }
-      return matches[2];
-    };
+    void _size;
+    void quality;
+    if (typeof document === 'undefined') return imageDataUrl;
+    try {
+        // Draw the original image, then overlay prompt text as a simple "edit"
+        const img = new Image();
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                canvas.width = img.width;
+                canvas.height = img.height;
+                const ctx = canvas.getContext('2d');
+                if (!ctx) return resolve(imageDataUrl);
+                ctx.drawImage(img, 0, 0);
 
-    // Prepare the payload for Flux Kontext Pro
-    const requestPayload: {
-      prompt: string;
-      input_image: string;
-      num_inference_steps?: number;
-      output_format?: string;
-    } = {
-      prompt: prompt,
-      input_image: `data:image/png;base64,${getBase64Data(imageDataUrl)}`,
-    };
+                // Optional background handling: if transparent requested, keep alpha
+                if (background === 'opaque') {
+                    ctx.globalCompositeOperation = 'destination-over';
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    ctx.globalCompositeOperation = 'source-over';
+                }
 
-    // Map quality settings to inference steps
-    if (quality !== "auto") {
-      requestPayload.num_inference_steps =
-        quality === "high" ? 50 : quality === "medium" ? 30 : 20;
+                // Overlay a subtle edit marker and prompt snippet
+                ctx.fillStyle = 'rgba(0,0,0,0.6)';
+                ctx.fillRect(0, canvas.height - 60, canvas.width, 60);
+                ctx.fillStyle = '#ffffff';
+                ctx.font = `${Math.max(
+                    14,
+                    Math.floor(canvas.width / 40)
+                )}px Arial`;
+                const text = `Edited: ${prompt.slice(0, 80)}`;
+                ctx.fillText(text, 16, canvas.height - 20);
+                resolve(canvas.toDataURL('image/png'));
+            };
+            img.onerror = () => resolve(imageDataUrl);
+            img.src = imageDataUrl;
+        });
+        return dataUrl;
+    } catch (error) {
+        console.warn('Local edit failed:', error);
+        return imageDataUrl;
     }
-
-    // Set output format
-    requestPayload.output_format = background === "transparent" ? "png" : "jpg";
-
-    const result = await callProxy({
-      service: "replicate",
-      operation: "image_edit",
-      payload: requestPayload,
-    });
-
-    const proxyResponse = result as ProxyResponse<string>;
-    const imageUrl = proxyResponse.data;
-
-    // Backend returns the URL string directly
-    if (typeof imageUrl === "string") {
-      const imageResponse = await fetch(imageUrl);
-      const imageBlob = await imageResponse.blob();
-      return await blobToBase64DataUrl(imageBlob);
-    } else {
-      throw new Error("No valid image URL received from Flux Kontext Dev");
-    }
-  } catch (error) {
-    console.error("Flux Kontext Dev edit error:", error);
-    const errorMessage =
-      error instanceof Error ? error.message : "Unknown error";
-    throw new Error(
-      `Image editing with Flux Kontext Dev failed: ${errorMessage}`
-    );
-  }
 };
 
 /**
@@ -159,26 +175,26 @@ export const edit = async (
  * @returns Base64 data URL of the generated PNG image with transparency
  */
 export const generateWithTransparency = async (
-  prompt: string,
-  quality: "low" | "medium" | "high" | "auto" = "auto",
-  size: "1024x1024" | "1024x1536" | "1536x1024" | "auto" = "auto"
+    prompt: string,
+    quality: 'low' | 'medium' | 'high' | 'auto' = 'auto',
+    size: '1024x1024' | '1024x1536' | '1536x1024' | 'auto' = 'auto'
 ): Promise<string> => {
-  // Add transparency hint to prompt if not already present
-  const enhancedPrompt =
-    prompt.toLowerCase().includes("transparent") ||
-    prompt.toLowerCase().includes("isolated")
-      ? prompt
-      : `${prompt}, isolated on transparent background`;
+    // Add transparency hint to prompt if not already present
+    const enhancedPrompt =
+        prompt.toLowerCase().includes('transparent') ||
+        prompt.toLowerCase().includes('isolated')
+            ? prompt
+            : `${prompt}, isolated on transparent background`;
 
-  return generate(enhancedPrompt, quality, size, "transparent");
+    return generate(enhancedPrompt, quality, size, 'transparent');
 };
 
 /**
  * Main export with all the functions
  */
 
-export const imageGeneration: ImageGenerationAPI = {
-  generate,
-  edit,
-  generateWithTransparency,
+export const imageGeneration = {
+    generate,
+    edit,
+    generateWithTransparency,
 };

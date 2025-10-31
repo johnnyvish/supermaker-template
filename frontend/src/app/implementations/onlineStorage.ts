@@ -1,259 +1,169 @@
-import { supabase } from "@/lib/v1/supabase";
-import type { OnlineStorageAPI } from "@/modules/module_types/onlineStorage";
+// Self-contained, browser-based implementation backed by localStorage
+const STORAGE_KEY_PREFIX = 'online_apps_';
 
-const STORAGE_KEY_PREFIX = "online_apps_";
-const TABLE_NAME = "app_factory_storage";
+const isBrowser =
+    typeof window !== 'undefined' && typeof localStorage !== 'undefined';
 
-// Helper to prefix keys for online storage
 const prefixKey = (key: string): string => {
-  // Use a default appId if global.appId is not available in web context
-  const appId =
-    ((globalThis as Record<string, unknown>).appId as string) || "web_app";
-  return `${STORAGE_KEY_PREFIX}${appId}_${key}`;
+    const appId =
+        ((globalThis as Record<string, unknown>).appId as string) || 'web_app';
+    return `${STORAGE_KEY_PREFIX}${appId}_${key}`;
 };
 
-export const onlineStorage: OnlineStorageAPI = {
-  async getItem(key: string): Promise<string | null> {
-    try {
-      const { data, error } = await supabase
-        .from(TABLE_NAME)
-        .select("value")
-        .eq("key", prefixKey(key))
-        .single();
-
-      if (error) {
-        if (error.code === "PGRST116") {
-          // No rows found
-          return null;
-        }
-        throw error;
-      }
-
-      return data?.value || null;
-    } catch (error) {
-      console.error("Error getting item:", error);
-      return null;
-    }
-  },
-
-  async setItem(key: string, value: string): Promise<boolean> {
-    try {
-      const { error } = await supabase.from(TABLE_NAME).upsert(
-        {
-          key: prefixKey(key),
-          value,
-          updated_at: new Date().toISOString(),
-        },
-        {
-          onConflict: "key",
-          ignoreDuplicates: false,
-        }
-      );
-
-      if (error) {
-        throw error;
-      }
-      return true;
-    } catch (error) {
-      console.error("Error setting item:", error);
-      return false;
-    }
-  },
-
-  async removeItem(key: string): Promise<boolean> {
-    try {
-      const { error } = await supabase
-        .from(TABLE_NAME)
-        .delete()
-        .eq("key", prefixKey(key));
-
-      if (error) {
-        throw error;
-      }
-      return true;
-    } catch (error) {
-      console.error("Error removing item:", error);
-      return false;
-    }
-  },
-
-  async getAllItems(): Promise<Record<string, string | null>> {
-    try {
-      const appId =
-        ((globalThis as Record<string, unknown>).appId as string) || "web_app";
-      const appSpecificPrefix = `${STORAGE_KEY_PREFIX}${appId}_`;
-      const { data, error } = await supabase
-        .from(TABLE_NAME)
-        .select("key, value")
-        .like("key", `${appSpecificPrefix}%`);
-
-      if (error) {
-        throw error;
-      }
-
-      const result: Record<string, string | null> = {};
-      data?.forEach((item) => {
-        // Remove the full app-specific prefix from the keys in the returned object
-        const cleanKey = item.key.slice(appSpecificPrefix.length);
-        result[cleanKey] = item.value;
-      });
-
-      return result;
-    } catch (error) {
-      console.error("Error getting all items:", error);
-      return {};
-    }
-  },
-
-  async clearAllItems(): Promise<boolean> {
-    try {
-      // Delete all rows with our app-specific prefix
-      const appId =
-        ((globalThis as Record<string, unknown>).appId as string) || "web_app";
-      const appSpecificPrefix = `${STORAGE_KEY_PREFIX}${appId}_`;
-      const { error } = await supabase
-        .from(TABLE_NAME)
-        .delete()
-        .like("key", `${appSpecificPrefix}%`);
-
-      if (error) {
-        throw error;
-      }
-      return true;
-    } catch (error) {
-      console.error("Error clearing all items:", error);
-      return false;
-    }
-  },
-
-  async getAllKeys(): Promise<string[]> {
-    try {
-      const appId =
-        ((globalThis as Record<string, unknown>).appId as string) || "web_app";
-      const appSpecificPrefix = `${STORAGE_KEY_PREFIX}${appId}_`;
-      const { data, error } = await supabase
-        .from(TABLE_NAME)
-        .select("key")
-        .like("key", `${appSpecificPrefix}%`)
-        .order("key");
-
-      if (error) {
-        throw error;
-      }
-
-      return (
-        data?.map((item) => item.key.slice(appSpecificPrefix.length)) || []
-      );
-    } catch (error) {
-      console.error("Error getting all keys:", error);
-      return [];
-    }
-  },
-
-  async mergeItem(key: string, value: string): Promise<boolean> {
-    try {
-      const existingValue = await this.getItem(key);
-
-      if (existingValue) {
+export const onlineStorage = {
+    async getItem(key: string): Promise<string | null> {
+        if (!isBrowser) return null;
         try {
-          // Parse both values as JSON
-          const existingObject = JSON.parse(existingValue);
-          const newObject = JSON.parse(value);
-
-          // Merge the objects
-          const mergedValue = JSON.stringify({
-            ...existingObject,
-            ...newObject,
-          });
-
-          // Save the merged value
-          return await this.setItem(key, mergedValue);
+            return localStorage.getItem(prefixKey(key));
         } catch (error) {
-          console.error("Merge error:", error);
-          throw new Error("Cannot merge non-JSON values");
+            console.error('Error getting item:', error);
+            return null;
         }
-      } else {
-        // If no existing value, just set the new value
-        return await this.setItem(key, value);
-      }
-    } catch (error) {
-      console.error("Error merging item:", error);
-      return false;
-    }
-  },
+    },
 
-  async multiGet(keys: string[]): Promise<Record<string, string | null>> {
-    if (keys.length === 0) return {};
+    async setItem(key: string, value: string): Promise<boolean> {
+        if (!isBrowser) return false;
+        try {
+            localStorage.setItem(prefixKey(key), value);
+            return true;
+        } catch (error) {
+            console.error('Error setting item:', error);
+            return false;
+        }
+    },
 
-    try {
-      const prefixedKeys = keys.map((key) => prefixKey(key));
-      const { data, error } = await supabase
-        .from(TABLE_NAME)
-        .select("key, value")
-        .in("key", prefixedKeys);
+    async removeItem(key: string): Promise<boolean> {
+        if (!isBrowser) return false;
+        try {
+            localStorage.removeItem(prefixKey(key));
+            return true;
+        } catch (error) {
+            console.error('Error removing item:', error);
+            return false;
+        }
+    },
 
-      if (error) {
-        throw error;
-      }
+    async getAllItems(): Promise<Record<string, string | null>> {
+        if (!isBrowser) return {};
+        try {
+            const appId =
+                ((globalThis as Record<string, unknown>).appId as string) ||
+                'web_app';
+            const appSpecificPrefix = `${STORAGE_KEY_PREFIX}${appId}_`;
+            const result: Record<string, string | null> = {};
+            for (let i = 0; i < localStorage.length; i++) {
+                const fullKey = localStorage.key(i);
+                if (fullKey && fullKey.startsWith(appSpecificPrefix)) {
+                    const cleanKey = fullKey.slice(appSpecificPrefix.length);
+                    result[cleanKey] = localStorage.getItem(fullKey);
+                }
+            }
+            return result;
+        } catch (error) {
+            console.error('Error getting all items:', error);
+            return {};
+        }
+    },
 
-      // Create a map of key to value for easy lookup
-      const keyValueMap = new Map<string, string>();
-      data?.forEach((item) => {
-        keyValueMap.set(item.key, item.value);
-      });
+    async clearAllItems(): Promise<boolean> {
+        if (!isBrowser) return false;
+        try {
+            const appId =
+                ((globalThis as Record<string, unknown>).appId as string) ||
+                'web_app';
+            const appSpecificPrefix = `${STORAGE_KEY_PREFIX}${appId}_`;
+            const toRemove: string[] = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith(appSpecificPrefix)) {
+                    toRemove.push(key);
+                }
+            }
+            toRemove.forEach((k) => localStorage.removeItem(k));
+            return true;
+        } catch (error) {
+            console.error('Error clearing all items:', error);
+            return false;
+        }
+    },
 
-      // Return the results in the same order as the input keys with original keys
-      return Object.fromEntries(
-        keys.map((key) => [key, keyValueMap.get(prefixKey(key)) || null])
-      );
-    } catch (error) {
-      console.error("Error in multiGet:", error);
-      return {};
-    }
-  },
+    async getAllKeys(): Promise<string[]> {
+        if (!isBrowser) return [];
+        try {
+            const appId =
+                ((globalThis as Record<string, unknown>).appId as string) ||
+                'web_app';
+            const appSpecificPrefix = `${STORAGE_KEY_PREFIX}${appId}_`;
+            const keys: string[] = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const fullKey = localStorage.key(i);
+                if (fullKey && fullKey.startsWith(appSpecificPrefix)) {
+                    keys.push(fullKey.slice(appSpecificPrefix.length));
+                }
+            }
+            keys.sort();
+            return keys;
+        } catch (error) {
+            console.error('Error getting all keys:', error);
+            return [];
+        }
+    },
 
-  async multiSet(keyValuePairs: [string, string][]): Promise<boolean> {
-    if (keyValuePairs.length === 0) return true;
+    async mergeItem(key: string, value: string): Promise<boolean> {
+        try {
+            const existingValue = await this.getItem(key);
+            if (existingValue) {
+                try {
+                    const existingObject = JSON.parse(existingValue);
+                    const newObject = JSON.parse(value);
+                    const mergedValue = JSON.stringify({
+                        ...existingObject,
+                        ...newObject,
+                    });
+                    return await this.setItem(key, mergedValue);
+                } catch (error) {
+                    console.error('Merge error:', error);
+                    throw new Error('Cannot merge non-JSON values');
+                }
+            }
+            return await this.setItem(key, value);
+        } catch (error) {
+            console.error('Error merging item:', error);
+            return false;
+        }
+    },
 
-    try {
-      const items = keyValuePairs.map(([key, value]) => ({
-        key: prefixKey(key),
-        value,
-        updated_at: new Date().toISOString(),
-      }));
+    async multiGet(keys: string[]): Promise<Record<string, string | null>> {
+        if (!isBrowser || keys.length === 0) return {};
+        const entries = await Promise.all(
+            keys.map(async (k) => [k, await this.getItem(k)] as const)
+        );
+        return Object.fromEntries(entries);
+    },
 
-      const { error } = await supabase.from(TABLE_NAME).upsert(items, {
-        onConflict: "key",
-        ignoreDuplicates: false,
-      });
+    async multiSet(keyValuePairs: [string, string][]): Promise<boolean> {
+        if (!isBrowser || keyValuePairs.length === 0) return true;
+        try {
+            for (const [k, v] of keyValuePairs) {
+                await this.setItem(k, v);
+            }
+            return true;
+        } catch (error) {
+            console.error('Error in multiSet:', error);
+            return false;
+        }
+    },
 
-      if (error) {
-        throw error;
-      }
-      return true;
-    } catch (error) {
-      console.error("Error in multiSet:", error);
-      return false;
-    }
-  },
-
-  async multiRemove(keys: string[]): Promise<boolean> {
-    if (keys.length === 0) return true;
-
-    try {
-      const prefixedKeys = keys.map((key) => prefixKey(key));
-      const { error } = await supabase
-        .from(TABLE_NAME)
-        .delete()
-        .in("key", prefixedKeys);
-
-      if (error) {
-        throw error;
-      }
-      return true;
-    } catch (error) {
-      console.error("Error in multiRemove:", error);
-      return false;
-    }
-  },
+    async multiRemove(keys: string[]): Promise<boolean> {
+        if (!isBrowser || keys.length === 0) return true;
+        try {
+            for (const k of keys) {
+                await this.removeItem(k);
+            }
+            return true;
+        } catch (error) {
+            console.error('Error in multiRemove:', error);
+            return false;
+        }
+    },
 };
