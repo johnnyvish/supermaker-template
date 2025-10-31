@@ -24,10 +24,15 @@ const isStorageKey = (fullKey: string) => fullKey.startsWith(STORAGE_PREFIX);
 const removePrefix = (fullKey: string, prefix: string) =>
     fullKey.substring(prefix.length);
 
+// In-memory fallback for SSR/non-browser contexts
+const memoryStore = new Map<string, string>();
+const memoryImageStore = new Map<string, string>();
+
 export const storage = {
     getItem: async (key: string) => {
         if (!isBrowser) {
-            throw new Error('Storage operations require a browser environment');
+            const prefixedKey = getPrefixedKey(key);
+            return memoryStore.get(prefixedKey) ?? null;
         }
 
         try {
@@ -48,7 +53,9 @@ export const storage = {
         );
 
         if (!isBrowser) {
-            throw new Error('Storage operations require a browser environment');
+            const prefixedKey = getPrefixedKey(key);
+            memoryStore.set(prefixedKey, value);
+            return true;
         }
 
         try {
@@ -63,7 +70,8 @@ export const storage = {
 
     removeItem: async (key: string) => {
         if (!isBrowser) {
-            throw new Error('Storage operations require a browser environment');
+            const prefixedKey = getPrefixedKey(key);
+            return memoryStore.delete(prefixedKey);
         }
 
         try {
@@ -78,7 +86,14 @@ export const storage = {
 
     getAllItems: async () => {
         if (!isBrowser) {
-            throw new Error('Storage operations require a browser environment');
+            const items: Record<string, string | null> = {};
+            for (const [k, v] of memoryStore.entries()) {
+                if (isStorageKey(k) && !isImageKey(k)) {
+                    const originalKey = removePrefix(k, STORAGE_PREFIX);
+                    items[originalKey] = v ?? null;
+                }
+            }
+            return items;
         }
 
         try {
@@ -105,7 +120,13 @@ export const storage = {
         );
 
         if (!isBrowser) {
-            throw new Error('Storage operations require a browser environment');
+            // Validate that it's a proper data URL
+            if (!imageDataUrl.startsWith('data:image/')) {
+                throw new Error('Invalid image data URL format');
+            }
+            const imageKey = getImageKey(key);
+            memoryImageStore.set(imageKey, imageDataUrl);
+            return true;
         }
 
         try {
@@ -125,7 +146,8 @@ export const storage = {
 
     getImageItem: async (key: string) => {
         if (!isBrowser) {
-            throw new Error('Storage operations require a browser environment');
+            const imageKey = getImageKey(key);
+            return memoryImageStore.get(imageKey) ?? null;
         }
 
         try {
@@ -140,7 +162,8 @@ export const storage = {
 
     removeImageItem: async (key: string) => {
         if (!isBrowser) {
-            throw new Error('Storage operations require a browser environment');
+            const imageKey = getImageKey(key);
+            return memoryImageStore.delete(imageKey);
         }
 
         try {
@@ -155,7 +178,21 @@ export const storage = {
 
     getAllImageItems: async () => {
         if (!isBrowser) {
-            throw new Error('Storage operations require a browser environment');
+            const items: Record<string, ImageMetadata> = {};
+            for (const [k, value] of memoryImageStore.entries()) {
+                const originalKey = removePrefix(k, IMAGE_PREFIX);
+                if (value) {
+                    items[originalKey] = {
+                        key: originalKey,
+                        filePath: value,
+                        mimeType: value.startsWith('data:')
+                            ? value.split(';')[0].split(':')[1]
+                            : 'image/jpeg',
+                        timestamp: Date.now(),
+                    };
+                }
+            }
+            return items;
         }
 
         try {

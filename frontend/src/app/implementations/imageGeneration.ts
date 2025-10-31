@@ -1,4 +1,8 @@
-// Self-contained image generation using Canvas as a placeholder
+// Self-contained image generation using Canvas as a placeholder or Replicate API if token provided
+
+const REPLICATE_API_TOKEN = process.env.NEXT_PUBLIC_REPLICATE_API_TOKEN;
+const REPLICATE_MODEL_VERSION =
+    process.env.NEXT_PUBLIC_REPLICATE_MODEL_VERSION || '';
 
 /**
  * Convert blob to base64 data URL
@@ -86,6 +90,73 @@ const drawPlaceholder = async (
     return canvas.toDataURL('image/png');
 };
 
+const generateViaReplicate = async (
+    prompt: string,
+    size: '1024x1024' | '1024x1536' | '1536x1024' | 'auto',
+    background: 'transparent' | 'opaque'
+): Promise<string> => {
+    if (!REPLICATE_API_TOKEN || !REPLICATE_MODEL_VERSION) {
+        // Missing configuration; fall back to placeholder
+        return drawPlaceholder(prompt, size, background);
+    }
+
+    try {
+        // Kick off prediction
+        const createRes = await fetch(
+            'https://api.replicate.com/v1/predictions',
+            {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${REPLICATE_API_TOKEN}`,
+                },
+                body: JSON.stringify({
+                    version: REPLICATE_MODEL_VERSION,
+                    input: { prompt },
+                }),
+            }
+        );
+        const created = await createRes.json();
+        const id: string | undefined = created?.id;
+        if (!id) throw new Error('Failed to create prediction');
+
+        // Poll for completion
+        let status = created?.status;
+        let output: string[] | null = created?.output || null;
+        const start = Date.now();
+        while (!output && status !== 'succeeded') {
+            if (Date.now() - start > 60_000) {
+                throw new Error('Prediction timed out');
+            }
+            await new Promise((r) => setTimeout(r, 1500));
+            const getRes = await fetch(
+                `https://api.replicate.com/v1/predictions/${id}`,
+                {
+                    headers: {
+                        Authorization: `Bearer ${REPLICATE_API_TOKEN}`,
+                    },
+                }
+            );
+            const pred = await getRes.json();
+            status = pred?.status;
+            output = pred?.output || null;
+            if (status === 'failed' || status === 'canceled') {
+                throw new Error(`Prediction ${status}`);
+            }
+        }
+
+        const url = Array.isArray(output) ? output[0] : null;
+        if (!url) throw new Error('No output image URL');
+
+        // Convert to data URL to match existing return type
+        const blob = await fetch(url).then((r) => r.blob());
+        return await blobToBase64DataUrl(blob);
+    } catch (e) {
+        console.warn('Replicate generation failed, using placeholder:', e);
+        return drawPlaceholder(prompt, size, background);
+    }
+};
+
 /**
  * Generate an image from a text prompt
  * @param prompt Text description of the image
@@ -101,7 +172,10 @@ export const generate = async (
     size: '1024x1024' | '1024x1536' | '1536x1024' | 'auto' = 'auto',
     background: 'transparent' | 'opaque' = 'opaque'
 ): Promise<string> => {
-    void quality; // quality is a no-op for the placeholder
+    void quality; // still a no-op for now
+    if (REPLICATE_API_TOKEN) {
+        return generateViaReplicate(prompt, size, background);
+    }
     return drawPlaceholder(prompt, size, background);
 };
 

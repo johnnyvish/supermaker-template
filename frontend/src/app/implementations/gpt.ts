@@ -4,7 +4,7 @@ const MEDIUM_GPT_MODEL = 'gpt-4o-mini';
 
 type ProxyResponse<T> = { success: boolean; data: T };
 type ChatCompletionResponse = {
-    choices?: Array<{ message?: { content?: string; tool_calls?: any[] } }>;
+    choices?: Array<{ message?: { content?: string; tool_calls?: unknown[] } }>;
 };
 type OpenAIResponse = {
     id?: string;
@@ -12,16 +12,27 @@ type OpenAIResponse = {
     error?: { message?: string } | unknown;
     output?: Array<{
         type?: string;
-        content?: Array<{ type?: string; text?: string; annotations?: any[] }>;
+        content?: Array<{
+            type?: string;
+            text?: string;
+            annotations?: unknown[];
+        }>;
     }>;
     incomplete_details?: { reason?: string };
+};
+
+const OPENAI_API_KEY = process.env.NEXT_PUBLIC_OPENAI_API_KEY;
+
+type GenericMessage = {
+    role: string;
+    content: string | Array<{ type?: string; text?: string }>;
 };
 
 const callProxy = async (args: {
     service: string;
     operation: string;
-    payload?: any;
-}): Promise<ProxyResponse<any>> => {
+    payload?: Record<string, unknown>;
+}): Promise<ProxyResponse<unknown>> => {
     const { service, operation, payload } = args;
 
     const makeEcho = (text: string) =>
@@ -30,21 +41,122 @@ const callProxy = async (args: {
         }): ${text}`;
 
     if (service === 'openai' && operation === 'chat_completion') {
-        const lastMsg = payload?.messages?.[payload.messages.length - 1];
-        const content = lastMsg?.content ?? '';
+        // If a real API key is available, perform an actual OpenAI call
+        if (OPENAI_API_KEY) {
+            try {
+                const response = await fetch(
+                    'https://api.openai.com/v1/chat/completions',
+                    {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            Authorization: `Bearer ${OPENAI_API_KEY}`,
+                        },
+                        body: JSON.stringify({
+                            model: payload?.model || DEFAULT_GPT_MODEL,
+                            messages: (
+                                (payload?.messages || []) as GenericMessage[]
+                            ).map((m) => {
+                                if (typeof m.content === 'string') {
+                                    return m;
+                                }
+                                const parts = (m.content || []) as Array<{
+                                    type?: string;
+                                    text?: string;
+                                }>;
+                                const text = parts
+                                    .filter(
+                                        (p) =>
+                                            p?.type === 'input_text' ||
+                                            p?.type === 'text'
+                                    )
+                                    .map((p) => p.text || '')
+                                    .join('\n');
+                                return { role: m.role, content: text };
+                            }),
+                            tools: payload?.tools,
+                            tool_choice: payload?.tool_choice,
+                        }),
+                    }
+                );
+                const data = await response.json();
+                return { success: true, data };
+            } catch {
+                // Fall through to local echo if network fails
+            }
+        }
+        const msgs = ((payload as { messages?: GenericMessage[] })?.messages ||
+            []) as GenericMessage[];
+        const lastMsg = msgs[msgs.length - 1];
+        const content = (lastMsg?.content as string) ?? '';
         return { success: true, data: { choices: [{ message: { content } }] } };
     }
 
     if (service === 'openai' && operation === 'responses_create') {
+        // Try real OpenAI call via chat completions for structured tasks if key exists
+        if (OPENAI_API_KEY) {
+            try {
+                const inputText =
+                    typeof payload?.input === 'string'
+                        ? payload.input
+                        : Array.isArray(payload?.input)
+                        ? (
+                              payload.input as Array<{
+                                  content?: Array<{ text?: string }>;
+                              }>
+                          )
+                              .map((m) =>
+                                  typeof (m as unknown as { content?: string })
+                                      .content === 'string'
+                                      ? ((m as unknown as { content?: string })
+                                            .content as string)
+                                      : m?.content?.[0]?.text || ''
+                              )
+                              .filter(Boolean)
+                              .join('\n')
+                        : (payload?.text as string) || '';
+
+                const response = await fetch(
+                    'https://api.openai.com/v1/chat/completions',
+                    {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            Authorization: `Bearer ${OPENAI_API_KEY}`,
+                        },
+                        body: JSON.stringify({
+                            model: payload?.model || DEFAULT_GPT_MODEL,
+                            messages: [
+                                payload?.instructions
+                                    ? {
+                                          role: 'system',
+                                          content: payload.instructions,
+                                      }
+                                    : undefined,
+                                { role: 'user', content: inputText },
+                            ].filter(Boolean),
+                        }),
+                    }
+                );
+                const data = await response.json();
+                return { success: true, data };
+            } catch {
+                // Fall back to echo stub
+            }
+        }
         const inputText =
             typeof payload?.input === 'string'
                 ? payload.input
                 : Array.isArray(payload?.input)
-                ? payload.input
-                      .map((m: any) => m?.content?.[0]?.text)
+                ? (
+                      payload.input as Array<{
+                          content?: Array<{ text?: string }>;
+                      }>
+                  )
+                      .map((m) => m?.content?.[0]?.text || '')
                       .filter(Boolean)
                       .join('\n')
-                : payload?.text || '';
+                : (payload?.text as string) || '';
         const text =
             typeof inputText === 'string'
                 ? inputText
@@ -134,7 +246,11 @@ const handleError = (response: OpenAIResponse) => {
     }
 
     if (response.error) {
-        throw new Error(response.error.message || 'Unknown API error');
+        if (typeof response.error === 'object' && response.error !== null) {
+            const maybeMsg = (response.error as { message?: string }).message;
+            throw new Error(maybeMsg || 'Unknown API error');
+        }
+        throw new Error('Unknown API error');
     }
 
     if (response.status === 'failed' || response.status === 'incomplete') {
@@ -265,16 +381,10 @@ export const ask = async (
             },
         });
 
-        // The proxy wraps the response in { success: true, data: ... }
-        // We need to unwrap it to access the OpenAI response
-        const proxyResponse = result as ProxyResponse<ChatCompletionResponse>;
-        const content =
-            proxyResponse.data?.choices?.[0]?.message?.content || '';
-
-        if (!content) {
-            // No content in response
-        }
-
+        const proxyResponse =
+            result as unknown as ProxyResponse<ChatCompletionResponse>;
+        const chatData = proxyResponse.data as ChatCompletionResponse;
+        const content = chatData.choices?.[0]?.message?.content || '';
         return content;
     } catch (error) {
         const errorMessage =
@@ -336,7 +446,46 @@ export const chat = async (
         return { text: extractedText, sessionId: chatSessionId };
     }
 
-    // Prepare request payload
+    // If real key available, call OpenAI chat completions using full history
+    if (OPENAI_API_KEY) {
+        try {
+            const fullMessages = [
+                ...(systemPrompt
+                    ? [{ role: 'system', content: systemPrompt }]
+                    : []),
+                ...session.messages.map((m) => ({
+                    role: m.role,
+                    content: m.content,
+                })),
+                { role: 'user', content: message },
+            ];
+
+            const result = await callProxy({
+                service: 'openai',
+                operation: 'chat_completion',
+                payload: {
+                    model: MEDIUM_GPT_MODEL,
+                    messages: fullMessages,
+                },
+            });
+
+            const chatProxy =
+                result as unknown as ProxyResponse<ChatCompletionResponse>;
+            const chatData = chatProxy.data as ChatCompletionResponse;
+            const content = chatData.choices?.[0]?.message?.content || '';
+
+            session.messages.push({ role: 'user', content: message });
+            session.messages.push({ role: 'assistant', content });
+
+            return { text: content, sessionId: chatSessionId };
+        } catch (error) {
+            const errorMessage =
+                error instanceof Error ? error.message : 'Unknown error';
+            throw new Error(`GPT chat request failed: ${errorMessage}`);
+        }
+    }
+
+    // Prepare fallback request payload for local echo flow
     const requestPayload: {
         model: string;
         previous_response_id?: string;
@@ -345,26 +494,21 @@ export const chat = async (
         model: MEDIUM_GPT_MODEL,
     };
 
-    // Add previous response ID if we have one (continuation of conversation)
     if (session.lastResponseId) {
         requestPayload.previous_response_id = session.lastResponseId;
         requestPayload.input = message;
     } else {
-        // First message in the conversation
         const messages: MessageInput[] = [];
-
         if (systemPrompt) {
             messages.push({
                 role: 'system',
                 content: [{ type: 'input_text', text: systemPrompt }],
             });
         }
-
         messages.push({
             role: 'user',
             content: [{ type: 'input_text', text: message }],
         });
-
         requestPayload.input = messages;
     }
 
@@ -375,8 +519,8 @@ export const chat = async (
             payload: requestPayload,
         });
 
-        const proxyResponse = result as ProxyResponse<OpenAIResponse>;
-        const response = proxyResponse.data;
+        const respProxy = result as ProxyResponse<OpenAIResponse>;
+        const response = respProxy.data;
 
         if (!response) {
             throw new Error('No data in proxy response');
@@ -446,6 +590,52 @@ export const analyzeImage = async (
     const formattedImageData = imageBase64.startsWith('data:image/')
         ? imageBase64
         : `data:image/jpeg;base64,${imageBase64}`;
+
+    // If API key is available, call Chat Completions with image content parts
+    if (OPENAI_API_KEY) {
+        try {
+            const response = await fetch(
+                'https://api.openai.com/v1/chat/completions',
+                {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${OPENAI_API_KEY}`,
+                    },
+                    body: JSON.stringify({
+                        model: MEDIUM_GPT_MODEL,
+                        messages: [
+                            { role: 'system', content: systemPrompt },
+                            {
+                                role: 'user',
+                                content: [
+                                    { type: 'text', text: finalPrompt },
+                                    {
+                                        type: 'image_url',
+                                        image_url: formattedImageData,
+                                    },
+                                ],
+                            },
+                        ],
+                    }),
+                }
+            );
+            const data = await response.json();
+            const content =
+                data?.choices?.[0]?.message?.content?.trim?.() || '';
+            try {
+                return JSON.parse(content);
+            } catch {
+                throw new Error('Failed to parse JSON response');
+            }
+        } catch (error) {
+            const errorMessage =
+                error instanceof Error ? error.message : 'Unknown error';
+            throw new Error(
+                `GPT image analysis request failed: ${errorMessage}`
+            );
+        }
+    }
 
     const requestPayload = {
         model: MEDIUM_GPT_MODEL,
@@ -533,6 +723,42 @@ export const getJSON = async (
     const enhancedPrompt = prompt.toLowerCase().includes('json')
         ? prompt
         : `Please provide the following information as JSON: ${prompt}`;
+
+    if (OPENAI_API_KEY) {
+        try {
+            const response = await fetch(
+                'https://api.openai.com/v1/chat/completions',
+                {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${OPENAI_API_KEY}`,
+                    },
+                    body: JSON.stringify({
+                        model: model,
+                        messages: [
+                            { role: 'system', content: instructions },
+                            { role: 'user', content: enhancedPrompt },
+                        ],
+                    }),
+                }
+            );
+            const data = await response.json();
+            const content =
+                data?.choices?.[0]?.message?.content?.trim?.() || '';
+            try {
+                return JSON.parse(content);
+            } catch {
+                throw new Error('Failed to parse JSON response');
+            }
+        } catch (error) {
+            const errorMessage =
+                error instanceof Error ? error.message : 'Unknown error';
+            throw new Error(
+                `GPT JSON generation request failed: ${errorMessage}`
+            );
+        }
+    }
 
     const requestPayload = {
         model: model,
@@ -645,7 +871,14 @@ export const webSearch = async (
                         contentItem?.type === 'output_text' &&
                         contentItem.annotations
                     ) {
-                        for (const annotation of contentItem.annotations) {
+                        for (const annotationRaw of contentItem.annotations) {
+                            const annotation = annotationRaw as {
+                                type?: string;
+                                title?: string;
+                                url?: string;
+                                start_index?: number;
+                                end_index?: number;
+                            };
                             if (annotation.type === 'url_citation') {
                                 citations.push({
                                     title: annotation.title,
@@ -755,7 +988,8 @@ const runWithTools = async (
         });
 
         // Handle as ProxyResponse<ChatCompletionResponse>
-        const proxyResponse = result as ProxyResponse<ChatCompletionResponse>;
+        const proxyResponse =
+            result as unknown as ProxyResponse<ChatCompletionResponse>;
         const message = proxyResponse.data?.choices?.[0]?.message;
 
         // Type for message with tool calls
