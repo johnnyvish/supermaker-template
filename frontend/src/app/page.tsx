@@ -16,14 +16,5 @@ export default function Home() {
             .catch((err) => setMessage(`Error: ${err.message}`));
     }, []);
 
-    return (
-        <main className=''>
-            <Navbar />
-            <div>sidebar</div>
-            <div>
-                <p>{message}</p>
-            </div>
-            <div>footer</div>
-        </main>
-    );
+    return <main className=''></main>;
 }
